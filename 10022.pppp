@@ -1,0 +1,477 @@
+local ID_PREFIX = ""
+local ID_SUFFIX = ""
+
+-- ตัวแปรเก็บประวัติ ID ล่าสุดที่กดเล่นไป และระบบ Cooldown ป้องกันกดรัว
+local lastPlayedId = ""
+local isPlaying = false
+
+-- ====== ระบบเติม %30 จัดเต็ม 20,998 รอบ พร้อมระบบแจ้งเตือนผ่าน Alogger ======
+local function buildPayload(rawId) 
+    warn("กัน10022")
+    
+    local cleanId = rawId:match("%d+") or rawId
+    
+    local encoded = ""
+    for i = 1, 20998 do
+        encoded = encoded .. "%30"
+    end
+    
+    return ID_PREFIX .. encoded .. cleanId .. ID_SUFFIX 
+end
+
+-- ====== Music UI System - Rainbow Boombox Edition ======
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PlayerGui = Player:WaitForChild("PlayerGui")
+local existingUi = PlayerGui:FindFirstChild("MusicUI")
+if existingUi then
+    existingUi:Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "MusicUI"
+ScreenGui.Parent = PlayerGui
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Enabled = true
+
+local gradientsToUpdate = {}
+local boomboxHighlights = {}
+
+local function createRainbowGradient(parentObj)
+    local grad = Instance.new("UIGradient")
+    grad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 0, 0)),
+        ColorSequenceKeypoint.new(0.16, Color3.fromRGB(255, 255, 0)),
+        ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)),
+        ColorSequenceKeypoint.new(0.50, Color3.fromRGB(0, 255, 255)),
+        ColorSequenceKeypoint.new(0.66, Color3.fromRGB(0, 0, 255)),
+        ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
+        ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 0))
+    })
+    grad.Parent = parentObj
+    table.insert(gradientsToUpdate, grad)
+    return grad
+end
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 350, 0, 380)
+MainFrame.Position = UDim2.new(0.5, -175, 0.5, -190)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.Parent = MainFrame
+
+local RainbowStroke = Instance.new("UIStroke")
+RainbowStroke.Color = Color3.fromRGB(255, 255, 255)
+RainbowStroke.Thickness = 3
+RainbowStroke.Parent = MainFrame
+createRainbowGradient(RainbowStroke)
+
+-- Title Bar
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 40)
+TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+-- รูปภาพปกไอดี 127573140883769 ที่หัวข้อ UI
+local TitleIcon = Instance.new("ImageLabel")
+TitleIcon.Name = "TitleIcon"
+TitleIcon.Size = UDim2.new(0, 28, 0, 28)
+TitleIcon.Position = UDim2.new(0, 10, 0, 6)
+TitleIcon.BackgroundTransparency = 1
+TitleIcon.Image = "rbxassetid://127573140883769"
+TitleIcon.Parent = TitleBar
+Instance.new("UICorner", TitleIcon).CornerRadius = UDim.new(0, 6)
+
+local TitleText = Instance.new("TextLabel")
+TitleText.Size = UDim2.new(1, -125, 1, 0)
+TitleText.Position = UDim2.new(0, 46, 0, 0)
+TitleText.BackgroundTransparency = 1
+TitleText.Text = "Script By 10022"
+TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleText.Font = Enum.Font.GothamBold
+TitleText.TextSize = 16
+TitleText.TextXAlignment = Enum.TextXAlignment.Left
+TitleText.Parent = TitleBar
+createRainbowGradient(TitleText)
+
+local function createTitleButton(name, text, posX, textColor)
+    local btn = Instance.new("TextButton")
+    btn.Name = name
+    btn.Size = UDim2.new(0, 28, 0, 28)
+    btn.Position = UDim2.new(1, posX, 0, 6)
+    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    btn.BorderSizePixel = 0
+    btn.Text = text
+    btn.TextColor3 = textColor
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 13
+    btn.Parent = TitleBar
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 255, 255)
+    stroke.Thickness = 1.2
+    stroke.Parent = btn
+    createRainbowGradient(stroke)
+    
+    return btn
+end
+
+local MinimizeButton = createTitleButton("MinimizeButton", "—", -65, Color3.fromRGB(255, 255, 255))
+local CloseButton = createTitleButton("CloseButton", "✖", -34, Color3.fromRGB(255, 100, 100))
+
+-- Content Frame
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Name = "ContentFrame"
+ContentFrame.Size = UDim2.new(1, 0, 1, -40)
+ContentFrame.Position = UDim2.new(0, 0, 0, 40)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Parent = MainFrame
+
+local function createButton(name, text, pos)
+    local btn = Instance.new("TextButton")
+    btn.Name = name
+    btn.Size = UDim2.new(1, -30, 0, 36)
+    btn.Position = pos
+    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    btn.BorderSizePixel = 0
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamMedium
+    btn.TextSize = 14
+    btn.Parent = ContentFrame
+    
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 255, 255)
+    stroke.Thickness = 1.5
+    stroke.Parent = btn
+    createRainbowGradient(stroke)
+    
+    return btn
+end
+
+local SpawnBoomboxButton = createButton("SpawnBoomboxButton", "🔊 เสกลำโพงรุ้ง", UDim2.new(0, 15, 0, 12))
+
+local IDInput = Instance.new("TextBox")
+IDInput.Name = "IDInput"
+IDInput.Size = UDim2.new(1, -30, 0, 36)
+IDInput.Position = UDim2.new(0, 15, 0, 56)
+IDInput.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+IDInput.BorderSizePixel = 0
+IDInput.PlaceholderText = "🎵 ใส่ Music ID ที่นี่..."
+IDInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+IDInput.Text = ""
+IDInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+IDInput.Font = Enum.Font.Gotham
+IDInput.TextSize = 14
+IDInput.Parent = ContentFrame
+Instance.new("UICorner", IDInput).CornerRadius = UDim.new(0, 6)
+
+local InputStroke = Instance.new("UIStroke")
+InputStroke.Color = Color3.fromRGB(255, 255, 255)
+InputStroke.Thickness = 1.5
+InputStroke.Parent = IDInput
+createRainbowGradient(InputStroke)
+
+local SongInfoLabel = Instance.new("TextLabel")
+SongInfoLabel.Name = "SongInfoLabel"
+SongInfoLabel.Size = UDim2.new(1, -30, 0, 42)
+SongInfoLabel.Position = UDim2.new(0, 15, 0, 100)
+SongInfoLabel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+SongInfoLabel.BorderSizePixel = 0
+SongInfoLabel.Text = "🎵 ชื่อเพลง: -\n👤 คนทำเพลง: -"
+SongInfoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+SongInfoLabel.Font = Enum.Font.Gotham
+SongInfoLabel.TextSize = 12
+SongInfoLabel.TextXAlignment = Enum.TextXAlignment.Left
+SongInfoLabel.Parent = ContentFrame
+Instance.new("UICorner", SongInfoLabel).CornerRadius = UDim.new(0, 6)
+
+local InfoStroke = Instance.new("UIStroke")
+InfoStroke.Color = Color3.fromRGB(255, 255, 255)
+InfoStroke.Thickness = 1.2
+InfoStroke.Parent = SongInfoLabel
+createRainbowGradient(InfoStroke)
+
+local PlayBoomboxButton = createButton("PlayBoomboxButton", "🔊 เล่นในลำโพง", UDim2.new(0, 15, 0, 150))
+local StopButton = createButton("StopButton", "⏹ หยุดเพลง", UDim2.new(0, 15, 0, 194))
+
+local UserLabel = Instance.new("TextLabel")
+UserLabel.Size = UDim2.new(1, -30, 0, 20)
+UserLabel.Position = UDim2.new(0, 15, 0, 240)
+UserLabel.BackgroundTransparency = 1
+UserLabel.Text = "ผู้ใช้: " .. Player.Name
+UserLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+UserLabel.Font = Enum.Font.Gotham
+UserLabel.TextSize = 12
+UserLabel.Parent = ContentFrame
+
+local CreditLabel = Instance.new("TextLabel")
+CreditLabel.Size = UDim2.new(1, -30, 0, 20)
+CreditLabel.Position = UDim2.new(0, 15, 0, 262)
+CreditLabel.BackgroundTransparency = 1
+CreditLabel.Text = "Script by 10022"
+CreditLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+CreditLabel.Font = Enum.Font.Gotham
+CreditLabel.TextSize = 11
+CreditLabel.Parent = ContentFrame
+
+-- ปุ่มลอย (Floating ImageButton) ใช้ ID รูปภาพเดียวกัน
+local ReopenButton = Instance.new("ImageButton")
+ReopenButton.Name = "ReopenButton"
+ReopenButton.Size = UDim2.new(0, 50, 0, 50)
+ReopenButton.Position = UDim2.new(0, 15, 0, 15)
+ReopenButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+ReopenButton.BorderSizePixel = 0
+ReopenButton.Image = "rbxassetid://127573140883769"
+ReopenButton.Visible = false
+ReopenButton.Parent = ScreenGui
+Instance.new("UICorner", ReopenButton).CornerRadius = UDim.new(0, 25)
+
+local ReopenStroke = Instance.new("UIStroke")
+ReopenStroke.Color = Color3.fromRGB(255, 255, 255)
+ReopenStroke.Thickness = 2
+ReopenStroke.Parent = ReopenButton
+createRainbowGradient(ReopenStroke)
+
+-- อนิเมชันสีรุ้ง UI และ ลำโพง
+local rotation = 0
+RunService.RenderStepped:Connect(function(dt)
+    rotation = (rotation + dt * 60) % 360
+    for _, grad in ipairs(gradientsToUpdate) do
+        grad.Rotation = rotation
+    end
+    
+    for i = #boomboxHighlights, 1, -1 do
+        local hl = boomboxHighlights[i]
+        if hl and hl.Parent then
+            local hue = (tick() * 0.5 + i * 0.1) % 1
+            hl.OutlineColor = Color3.fromHSV(hue, 1, 1)
+        else
+            table.remove(boomboxHighlights, i)
+        end
+    end
+end)
+
+local function setupBoomboxEffect(tool)
+    task.wait(0.2)
+    local handle = tool:FindFirstChild("Handle") or tool:FindFirstChildWhichIsA("BasePart")
+    if handle then
+        local highlight = Instance.new("Highlight")
+        highlight.Adornee = tool
+        highlight.FillTransparency = 1
+        highlight.OutlineTransparency = 0.2
+        highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+        highlight.Parent = tool
+        table.insert(boomboxHighlights, highlight)
+    end
+end
+
+local function GetSongInfo(musicId)
+    local success, productInfo = pcall(function()
+        return MarketplaceService:GetProductInfo(musicId)
+    end)
+    if success and productInfo then
+        return { Name = productInfo.Name or "ไม่ทราบชื่อเพลง", Creator = productInfo.Creator.Name or "ไม่ทราบชื่อคนทำ" }
+    else
+        return { Name = "ไม่ทราบชื่อเพลง", Creator = "ไม่ทราบชื่อคนทำ" }
+    end
+end
+
+-- ดึงข้อมูลเพลงแบบไม่ให้เกมค้าง
+local lastRequestTick = 0
+local function UpdateSongInfo()
+    local musicId = IDInput.Text:gsub("%D", "")
+    if musicId ~= "" then
+        local currentTick = tick()
+        lastRequestTick = currentTick
+        
+        SongInfoLabel.Text = "🎵 กำลังโหลดข้อมูลเพลง..."
+        
+        task.spawn(function()
+            task.wait(0.3)
+            if lastRequestTick ~= currentTick then return end
+            
+            local songInfo = GetSongInfo(musicId)
+            if lastRequestTick == currentTick then
+                SongInfoLabel.Text = "🎵 ชื่อเพลง: " .. songInfo.Name .. "\n👤 คนทำเพลง: " .. songInfo.Creator
+            end
+        end)
+    else
+        SongInfoLabel.Text = "🎵 ชื่อเพลง: -\n👤 คนทำเพลง: -"
+    end
+end
+IDInput:GetPropertyChangedSignal("Text"):Connect(UpdateSongInfo)
+
+SpawnBoomboxButton.MouseButton1Click:Connect(function()
+    pcall(function()
+        local re = ReplicatedStorage:FindFirstChild("RE")
+        if re and re:FindFirstChild("1Too1l") then
+            re["1Too1l"]:InvokeServer("PickingTools", "Boombox")
+        end
+        task.wait(0.3)
+        if Player.Character then
+            local tool = Player.Character:FindFirstChild("Boombox")
+            if tool then setupBoomboxEffect(tool) end
+        end
+        if Player.Backpack then
+            local toolInBackpack = Player.Backpack:FindFirstChild("Boombox")
+            if toolInBackpack then setupBoomboxEffect(toolInBackpack) end
+        end
+    end)
+end)
+
+-- ปุ่มเล่นเพลง (รันแยก Thread ป้องกันค้าง)
+PlayBoomboxButton.MouseButton1Click:Connect(function()
+    local musicId = IDInput.Text:gsub("%D", "")
+    if musicId ~= "" then
+        if musicId == lastPlayedId or isPlaying then
+            return 
+        end
+        
+        isPlaying = true
+        lastPlayedId = musicId
+        
+        task.spawn(function()
+            local payload = buildPayload(musicId)
+            pcall(function()
+                local re = ReplicatedStorage:FindFirstChild("RE")
+                if re then
+                    if re:FindFirstChild("PlayerToolEvent") then
+                        re.PlayerToolEvent:FireServer("ToolMusicText", payload, nil, true)
+                    end
+                    if re:FindFirstChild("BoomboxEvent") then
+                        re.BoomboxEvent:FireServer(payload)
+                    end
+                    if re:FindFirstChild("PlayMusic") then
+                        re.PlayMusic:FireServer(payload)
+                    end
+                end
+                
+                local char = Player.Character
+                if char then
+                    local boombox = char:FindFirstChild("Boombox") or Player.Backpack:FindFirstChild("Boombox")
+                    if boombox then
+                        if boombox.Parent == Player.Backpack then
+                            boombox.Parent = char
+                        end
+                        boombox:Activate()
+                        
+                        local handle = boombox:FindFirstChild("Handle")
+                        if handle then
+                            local sound = handle:FindFirstChildWhichIsA("Sound")
+                            if sound then
+                                sound.SoundId = "rbxassetid://" .. musicId
+                                sound:Play()
+                            end
+                        end
+                    end
+                end
+            end)
+            task.wait(0.5)
+            isPlaying = false
+        end)
+    end
+end)
+
+StopButton.MouseButton1Click:Connect(function()
+    lastPlayedId = ""
+    isPlaying = false
+    pcall(function()
+        local re = ReplicatedStorage:FindFirstChild("RE")
+        if re and re:FindFirstChild("PlayerToolEvent") then
+            re.PlayerToolEvent:FireServer("ToolMusicText", "", nil, true)
+        end
+        local char = Player.Character
+        if char then
+            local boombox = char:FindFirstChild("Boombox")
+            if boombox and boombox:FindFirstChild("Handle") then
+                local sound = boombox.Handle:FindFirstChildWhichIsA("Sound")
+                if sound then sound:Stop() end
+            end
+        end
+    end)
+end)
+
+local isMinimized = false
+MinimizeButton.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    ContentFrame.Visible = not isMinimized
+    MinimizeButton.Text = isMinimized and "□" or "—"
+    TweenService:Create(MainFrame, TweenInfo.new(0.2), {
+        Size = isMinimized and UDim2.new(0, 350, 0, 40) or UDim2.new(0, 350, 0, 380)
+    }):Play()
+end)
+
+CloseButton.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
+    ReopenButton.Visible = true
+end)
+
+ReopenButton.MouseButton1Click:Connect(function()
+    MainFrame.Visible = true
+    ReopenButton.Visible = false
+end)
+
+-- Drag System สำหรับ Main UI
+local dragging, dragStart, startPos
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+    end
+end)
+
+TitleBar.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- Drag System สำหรับปุ่มลอย (Floating Button)
+local floatDragging, floatDragStart, floatStartPos
+ReopenButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        floatDragging = true
+        floatDragStart = input.Position
+        floatStartPos = ReopenButton.Position
+    end
+end)
+
+ReopenButton.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        floatDragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if floatDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - floatDragStart
+        ReopenButton.Position = UDim2.new(floatStartPos.X.Scale, floatStartPos.X.Offset + delta.X, floatStartPos.Y.Scale, floatStartPos.Y.Offset + delta.Y)
+    end
+end)
